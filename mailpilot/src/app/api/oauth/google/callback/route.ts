@@ -5,8 +5,15 @@ import { createClient } from "@/lib/supabase/server";
 import { admin } from "@/lib/supabase/admin";
 import { encrypt } from "@/lib/crypto";
 import { exchangeCode, userInfo, googleConfigured, SCOPES } from "@/lib/providers/gmail";
+import { checkIncomingRequestLimit } from "@/lib/security/rate-limit";
+import { recordAbuseEvent } from "@/lib/security/abuse";
 const back = (req: Request, k: string, m: string) => NextResponse.redirect(new URL(`/dashboard/senders?${k}=${encodeURIComponent(m)}`, req.url));
 export async function GET(req: Request) {
+  const limited = await checkIncomingRequestLimit("oauth.google.callback", req.headers, undefined, 20);
+  if (!limited.allowed) {
+    if (limited.thresholdCrossed) await recordAbuseEvent("rate_limit.oauth.google.callback", limited.ip, { bucket: limited.bucket });
+    return back(req, "error", "Too many connection attempts. Please wait a minute and try again.");
+  }
   const { data: { user } } = await (await createClient()).auth.getUser();
   if (!user) return NextResponse.redirect(new URL("/login", req.url));
   const url = new URL(req.url);

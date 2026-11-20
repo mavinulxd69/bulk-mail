@@ -1,7 +1,49 @@
 @tailwind base; @tailwind components; @tailwind utilities;
-:root { color-scheme: light dark; }
-body { @apply bg-paper text-ink antialiased; }
-.dark body { @apply bg-[#0A1128] text-sky; }
+:root {
+  color-scheme: light;
+  --app-bg: #f7f8fc;
+  --app-surface: #ffffff;
+  --app-surface-muted: #f1f3f8;
+  --app-foreground: #0e1b3d;
+  --app-border: rgba(14, 27, 61, 0.1);
+  --font-display: "Aptos Display", "Segoe UI", system-ui, sans-serif;
+  --font-body: "Aptos", "Segoe UI", system-ui, sans-serif;
+}
+:root.dark {
+  color-scheme: dark;
+  --app-bg: #0b1120;
+  --app-surface: #121b2d;
+  --app-surface-muted: #1a263b;
+  --app-foreground: #e6edf8;
+  --app-border: rgba(202, 215, 237, 0.14);
+}
+body { @apply antialiased; background: var(--app-bg); color: var(--app-foreground); }
+.dark [class~="bg-white"] { background-color: var(--app-surface); }
+.dark [class~="bg-paper"] { background-color: var(--app-bg); }
+.dark [class~="bg-paper/90"] { background-color: rgb(11 17 32 / 90%); }
+.dark [class~="bg-mist"] { background-color: var(--app-surface-muted); }
+.dark [class~="bg-mist/80"] { background-color: rgb(26 38 59 / 80%); }
+.dark [class~="text-ink"] { color: var(--app-foreground); }
+.dark [class~="text-ink/75"],
+.dark [class~="text-ink/70"] { color: #b7c3d6; }
+.dark [class~="text-ink/60"] { color: #a4b2c9; }
+.dark [class~="text-ink/50"] { color: #91a1bb; }
+.dark [class~="text-ink/40"] { color: #8192ad; }
+.dark [class~="border-ink/10"],
+.dark [class~="border-ink/15"] { border-color: var(--app-border); }
+.dark [class~="border-ink/25"] { border-color: rgba(202, 215, 237, 0.25); }
+.dark [class~="divide-ink/10"] > :not([hidden]) ~ :not([hidden]) { border-color: var(--app-border); }
+.dark [class~="hover:bg-mist"]:hover { background-color: var(--app-surface-muted); }
+.dark [class~="bg-indigo-50"] { background-color: #202a46; }
+.dark [class~="text-indigo-950"] { color: #e0e7ff; }
+.dark [class~="text-indigo-700"] { color: #c7d2fe; }
+.dark [class~="text-violet-700"] { color: #ddd6fe; }
+.dark [class~="text-amber-700"] { color: #fde68a; }
+.dark [class~="text-rose-700"] { color: #fecdd3; }
+.dark [class~="text-emerald-700"] { color: #a7f3d0; }
+.dark [class~="bg-violet-50"] { background-color: #302541; }
+.dark [class~="bg-amber-50"] { background-color: #382d1a; }
+.dark [class~="bg-rose-50"] { background-color: #3b202c; }
+.dark [class~="bg-emerald-50"] { background-color: #18352f; }
 .airmail { background: repeating-linear-gradient(-45deg,#E5484D 0 14px,#fff 14px 28px,#2F5BEA 28px 42px,#fff 42px 56px); }
 :focus-visible { outline: 3px solid #2F5BEA; outline-offset: 2px; }
-@media (prefers-color-scheme: dark) { body { background:#0A1128; color:#DCE8FF; } }

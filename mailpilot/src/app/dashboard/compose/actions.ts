@@ -19,6 +19,8 @@ import { AiError, TONES } from "@/lib/ai/types";
 import { MAX_BRIEF } from "@/lib/ai/prompt";
 import { providerFor, type SenderRow } from "@/lib/providers";
 import { ProviderError } from "@/lib/providers/types";
+import { checkClientRequestLimit } from "@/lib/security/rate-limit";
+import { recordAbuseEvent } from "@/lib/security/abuse";
 
 const uuid = z.string().uuid();
 async function me() { const sb = await createClient(); const { data: { user } } = await sb.auth.getUser(); if (!user) redirect("/login"); return { sb, user }; }
@@ -163,6 +165,11 @@ function sendError(e: unknown): string {
 
 export async function sendTest(_prev: TestState, fd: FormData): Promise<TestState> {
   const { sb, user } = await me();
+  const limited = await checkClientRequestLimit("compose.test_send", user.id, 5);
+  if (!limited.allowed) {
+    if (limited.thresholdCrossed) await recordAbuseEvent("rate_limit.compose.test_send", limited.ip, { bucket: limited.bucket }, user.id);
+    return { status: "error", message: "Too many test-send requests. Try again in a minute." };
+  }
   if (!user.email || !user.email_confirmed_at) return { status: "error", message: "Verify your account email before sending tests." };
   const c = readContent(fd);
   const senderId = uuid.safeParse(fd.get("sender_id"));
@@ -212,6 +219,11 @@ export async function sendTest(_prev: TestState, fd: FormData): Promise<TestStat
 // ---------- AI draft: produces text for the user to review. It cannot send anything. ----------
 export async function generateDraft(_prev: DraftState, fd: FormData): Promise<DraftState> {
   const { sb, user } = await me();
+  const limited = await checkClientRequestLimit("compose.ai_draft", user.id, 10);
+  if (!limited.allowed) {
+    if (limited.thresholdCrossed) await recordAbuseEvent("rate_limit.compose.ai_draft", limited.ip, { bucket: limited.bucket }, user.id);
+    return { status: "error", message: "Too many draft requests. Try again in a minute." };
+  }
   const provider = getAiProvider();
   if (!provider) return { status: "not_configured" };
   const p = z.object({ brief: z.string().trim().min(10).max(MAX_BRIEF), tone: z.enum(TONES), audience: z.union([uuid, z.literal("all")]) })

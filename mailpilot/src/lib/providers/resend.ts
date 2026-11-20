@@ -1,5 +1,5 @@
 import "server-only";
-import { ProviderError, type EmailProvider } from "./types";
+import { ProviderError, requireProviderMessageId, type EmailProvider } from "./types";
 export const resendConfigured = () => !!process.env.RESEND_API_KEY;
 async function api<T>(path: string, init: RequestInit & { idem?: string } = {}): Promise<T> {
   let r: Response;
@@ -15,6 +15,6 @@ export const createDomain = (name: string) => api<ResendDomain>("/domains", { me
 export const getDomain = (id: string) => api<ResendDomain>(`/domains/${id}`);
 export const verifyDomain = (id: string) => api<unknown>(`/domains/${id}/verify`, { method: "POST" });
 export const resendProvider: EmailProvider = { id: "resend", async send(i) {
-  const j = await api<{ id: string }>("/emails", { method: "POST", idem: i.idempotencyKey, body: JSON.stringify({ from: i.from.name ? `${i.from.name} <${i.from.address}>` : i.from.address, to: [i.to], subject: i.subject, text: i.text, html: i.html, reply_to: i.replyTo, headers: i.headers }) });
-  return { status: "accepted", providerMessageId: j.id };
+  const j = await api<unknown>("/emails", { method: "POST", idem: i.idempotencyKey, body: JSON.stringify({ from: i.from.name ? `${i.from.name} <${i.from.address}>` : i.from.address, to: [i.to], subject: i.subject, text: i.text, html: i.html, reply_to: i.replyTo, headers: i.headers }) });
+  return { status: "accepted", providerMessageId: requireProviderMessageId(j, "Resend") };
 } };

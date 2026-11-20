@@ -2,7 +2,7 @@ import "server-only";
 import { randomBytes } from "node:crypto";
 import { admin } from "../supabase/admin";
 import { decrypt, encrypt } from "../crypto";
-import { ProviderError, type EmailProvider, type SendInput } from "./types";
+import { ProviderError, requireProviderMessageId, type EmailProvider, type SendInput } from "./types";
 
 export const SCOPES = "openid email https://www.googleapis.com/auth/gmail.send"; // minimum: send only, no mailbox read
 export const googleConfigured = () => !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.TOKEN_ENCRYPTION_KEY);
@@ -61,7 +61,11 @@ export function gmailProvider(senderId: string, userId: string): EmailProvider {
     let r: Response;
     try { r = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", { method: "POST", headers: { Authorization: `Bearer ${at}`, "Content-Type": "application/json" }, body: JSON.stringify({ raw: Buffer.from(buildMime(i)).toString("base64url") }), signal: AbortSignal.timeout(SEND_TIMEOUT_MS) }); }
     catch { throw new ProviderError("unknown", "No answer from Gmail"); } // may have been sent: never retried automatically (no idempotency in the Gmail API)
-    if (r.ok) return { status: "accepted", providerMessageId: ((await r.json()) as { id: string }).id };
+    if (r.ok) {
+      let body: unknown;
+      try { body = await r.json(); } catch { body = null; }
+      return { status: "accepted", providerMessageId: requireProviderMessageId(body, "Gmail") };
+    }
     const body = await r.text();
     if (r.status === 429 || /rateLimitExceeded|userRateLimitExceeded|dailyLimitExceeded/.test(body)) throw new ProviderError("quota", "Gmail quota reached");
     if (r.status === 401) throw new ProviderError("auth", "Gmail rejected credentials");

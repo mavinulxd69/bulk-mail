@@ -192,7 +192,7 @@ export function Composer({ initial, senders, lists, variables, aiEnabled, aiDail
             <button type="submit" formAction={saveAction} className={btn} disabled={saving || audienceBroken}>{saving ? "Saving…" : campaignId ? "Save changes" : "Save as draft"}</button>
             <button type="submit" formAction={testAction} className={btn2} disabled={testing || !senderId || !hasBody || audienceBroken}>{testing ? "Sending…" : "Send a test to me"}</button>
           </div>
-          <p className="text-xs text-ink/60">A test is a real email with real data from one contact, delivered only to your own verified address. Choose the recipient in the preview. Campaigns can&apos;t be sent from here yet: approval and sending arrive in the next phase.</p>
+          <p className="text-xs text-ink/60">A test is a real email with real data from one contact, sent only to your own verified address. Choose the recipient in the preview. To send a campaign, save it as a draft, open its review page, and explicitly confirm sending.</p>
           <div aria-live="polite" className="space-y-2">
             {saved.status === "error" && <Alert kind="error">{saved.message}</Alert>}
             {saved.status === "saved" && <Alert kind="ok">{saved.message} <Link href={`/dashboard/campaigns/${saved.id}`} className="underline">Review &amp; approve →</Link></Alert>}

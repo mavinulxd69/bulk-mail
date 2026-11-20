@@ -25,7 +25,7 @@ describe.skipIf(!URL_ || !SECRET)("sending queue against a real database", () =>
   const b = URL_ ? client({ role: "authenticated", sub: B }) : (null as never);
   const svc = URL_ ? client({ role: "service_role" }) : (null as never);
   const store = () => supabaseStore(svc);
-  const SENDER = "00000000-0000-0000-0000-0000000000a1", SENDER_B = "00000000-0000-0000-0000-0000000000b1";
+  const SENDER = "00000000-0000-0000-0000-0000000000a1", SENDER_2 = "00000000-0000-0000-0000-0000000000a2", SENDER_B = "00000000-0000-0000-0000-0000000000b1";
   const user = { email: "a@test.dev", email_confirmed_at: "2026-01-01" };
   let sent: SendInput[]; let calls: Map<string, number>;
   const provider = (behave?: (i: SendInput, n: number) => void): EmailProvider => ({ id: "gmail", async send(i) {
@@ -54,7 +54,7 @@ describe.skipIf(!URL_ || !SECRET)("sending queue against a real database", () =>
     const inAud = new Set(ready.audience.audience.map((x) => x.id));
     const prepared = prepareCampaign({ template: ready.template, contacts: ready.audience.contacts, includeUnconsented: !!o.includeUnconsented, siteUrl: ready.site, suppressedEmails: new Set(ready.audience.contacts.filter((x) => !inAud.has(x.id)).map((x) => x.email)) });
     if (prepared.blocked.length && !o.skipBlocked) throw new Error("blocked");
-    expect((await svc.rpc("begin_queueing", { p_campaign: id, p_user: A })).data).toBe(true);
+    expect((await svc.rpc("begin_queueing", { p_campaign: id, p_user: A, p_requested: prepared.messages.length })).data).toBe(true);
     const n = await enqueueMessages(svc, { userId: A, campaignId: id, messages: prepared.messages, suppressed: prepared.suppressed, provider: ready.sender.provider, maxAttempts: 3 });
     await svc.from("campaigns").update({ send_rate_per_minute: o.rate ?? 120, skipped_count: prepared.blocked.length + prepared.unconsented.length }).eq("id", id);
     expect((await svc.rpc("activate_campaign", { p_campaign: id, p_user: A, p_expected: n })).data).toBe(true);
@@ -99,6 +99,22 @@ describe.skipIf(!URL_ || !SECRET)("sending queue against a real database", () =>
     const p = provider(); await Promise.all([tick(p), tick(p), tick(p)]);
     expect(sent).toHaveLength(43); for (const n of calls.values()) expect(n).toBe(1);
     expect(await statusOf(id)).toBe("completed");
+  });
+
+  it("shares the rolling daily cap across a user's sender accounts during concurrent claims", async () => {
+    await seedSender();
+    await must(svc.from("sender_accounts").insert({ id: SENDER_2, user_id: A, provider: "gmail", from_address: "second@a.test", display_name: "Second", status: "connected", daily_quota: 1000 }));
+    const first = await draft();
+    const second = await draft({ sender_id: SENDER_2 });
+    await approve(first);
+    await approve(second);
+    const config = { ...queueConfig(), userPerDay: 1, batchSize: 1 };
+    const one = tick(provider(), config);
+    const two = tick(provider(), config);
+    await Promise.all([one, two]);
+    const { count, error } = await svc.from("sending_jobs").select("id", { count: "exact", head: true }).eq("user_id", A).in("status", ["accepted", "delivered"]);
+    expect(error).toBeNull();
+    expect(count).toBe(1);
   });
 
   it("applies the per-campaign rate limit", async () => {

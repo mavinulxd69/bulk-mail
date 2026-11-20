@@ -1,11 +1,20 @@
 import { admin } from "@/lib/supabase/admin";
 import { maskEmail, TOKEN_RE } from "@/lib/queue/unsubscribe";
+import { checkIncomingRequestLimit } from "@/lib/security/rate-limit";
+import { recordAbuseEvent } from "@/lib/security/abuse";
 import { confirmUnsubscribe } from "./actions";
+import { headers } from "next/headers";
 
 export const metadata = { title: "Unsubscribe", robots: { index: false, follow: false } };
+export const dynamic = "force-dynamic";
 // A GET only shows a confirmation button. Mail scanners that pre-fetch links therefore can't unsubscribe anyone by accident.
 export default async function Unsubscribe({ params, searchParams }: { params: Promise<{ token: string }>; searchParams: Promise<{ done?: string }> }) {
   const { token } = await params; const { done } = await searchParams;
+  const limited = await checkIncomingRequestLimit("unsubscribe.view", await headers(), token, 60);
+  if (!limited.allowed) {
+    if (limited.thresholdCrossed) await recordAbuseEvent("rate_limit.unsubscribe.view", limited.ip, { bucket: limited.bucket });
+    return <main className="mx-auto max-w-md p-8"><h1 className="font-display text-2xl font-bold">Unsubscribe</h1><p role="status" className="mt-4">Too many requests. Please try again in a minute.</p></main>;
+  }
   let email: string | null = null, already = false;
   if (TOKEN_RE.test(token)) {
     const db = admin();

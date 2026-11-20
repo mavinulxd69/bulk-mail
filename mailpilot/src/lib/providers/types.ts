@@ -6,4 +6,8 @@ export interface SendResult { status: "accepted"; providerMessageId: string; sim
 // de-duplicate on the idempotency key (Resend) may retry these; Gmail cannot, so the queue fails them instead of risking a duplicate.
 export type ErrorKind = "temporary" | "permanent" | "quota" | "auth" | "unknown";
 export class ProviderError extends Error { constructor(public kind: ErrorKind, message: string) { super(message); } }
+export function requireProviderMessageId(value: unknown, provider: "Gmail" | "Resend"): string {
+  if (value && typeof value === "object" && "id" in value && typeof value.id === "string" && value.id.trim()) return value.id;
+  throw new ProviderError("unknown", `${provider} returned an acceptance response without a message ID`);
+}
 export interface EmailProvider { id: "gmail" | "resend" | "mock"; send(input: SendInput): Promise<SendResult>; }

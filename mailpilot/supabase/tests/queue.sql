@@ -1,5 +1,5 @@
--- Phase 6 checks: queue claiming, quotas, rates, pauses, crash recovery, campaign status, approval steps, unsubscribe,
--- webhook application, contact erasure and privileges. Run AFTER migrations 0001-0005. Raises on any failure; rolls back.
+-- Queue and security checks: claiming, quotas, rates, pauses, crash recovery, campaign status, approval steps, unsubscribe,
+-- webhook application, contact erasure and privileges. Run AFTER migrations 0001-0007. Raises on any failure; rolls back.
 begin;
 
 insert into auth.users (id, instance_id, aud, role, email) values
@@ -35,6 +35,7 @@ end $$;
 create function pg_temp.reset() returns void language sql as $$
   delete from campaigns;  -- cascades to recipients, jobs, events
   update sender_accounts set status = 'connected', paused_until = null, pause_count = 0, pause_reason = null, daily_quota = 100;
+  update profiles set monthly_send_limit = 100;
 $$;
 create function pg_temp.claimed(p_batch int default 100, p_rate int default 1000, p_user_day int default 100000) returns int language sql as $$
   select count(*)::int from claim_send_jobs('w-test', p_batch, p_rate, p_user_day);
@@ -204,9 +205,9 @@ end $$;
 do $$ declare a uuid := '00000000-0000-0000-0000-00000000000a'; b uuid := '00000000-0000-0000-0000-00000000000b'; s1 uuid := '00000000-0000-0000-0000-0000000000a1'; q uuid; n int;
 begin
   perform pg_temp.reset(); q := pg_temp.camp(a, s1, 'awaiting_approval');
-  if begin_queueing(q, b) then raise exception 'FAIL: other user began queueing'; end if;
-  if not begin_queueing(q, a) then raise exception 'FAIL: begin_queueing'; end if;
-  if begin_queueing(q, a) then raise exception 'FAIL: double approval (double click) was accepted'; end if;
+  if begin_queueing(q, b, 2) then raise exception 'FAIL: other user began queueing'; end if;
+  if not begin_queueing(q, a, 2) then raise exception 'FAIL: begin_queueing'; end if;
+  if begin_queueing(q, a, 2) then raise exception 'FAIL: double approval (double click) was accepted'; end if;
   perform pg_temp.jobs(q, 2);
   if activate_campaign(q, a, 3) then raise exception 'FAIL: activated with the wrong job count'; end if;
   perform pg_temp.assert_eq('half-written campaign is not claimable', pg_temp.claimed(), 0);
@@ -215,21 +216,37 @@ begin
   select count(*) into n from sending_jobs where campaign_id = q; perform pg_temp.assert_eq('rollback removes jobs', n, 0);
   if (select approved_at from campaigns where id = q) is not null or (select queue_started_at from campaigns where id = q) is not null then raise exception 'FAIL: rollback left approval stamps'; end if;
   perform pg_temp.assert_eq('campaign is reviewable again', (select status from campaigns where id = q), 'awaiting_approval');
-  perform begin_queueing(q, a); perform pg_temp.jobs(q, 2);
+  perform begin_queueing(q, a, 2); perform pg_temp.jobs(q, 2);
   if not activate_campaign(q, a, 2) then raise exception 'FAIL: activate with the right count'; end if;
   perform pg_temp.assert_eq('queued after activation', (select status from campaigns where id = q), 'queued');
-  if begin_queueing(q, a) then raise exception 'FAIL: re-approval of a queued campaign'; end if;
+  if begin_queueing(q, a, 2) then raise exception 'FAIL: re-approval of a queued campaign'; end if;
   perform rollback_queueing(q, a);
   select count(*) into n from sending_jobs where campaign_id = q; perform pg_temp.assert_eq('rollback never touches a queued campaign', n, 2);
   perform pg_temp.assert_eq('queued campaign is claimable', pg_temp.claimed(), 2);
 
   -- stale approval recovery
-  q := pg_temp.camp(a, s1, 'awaiting_approval'); perform begin_queueing(q, a); perform pg_temp.jobs(q, 2);
+  q := pg_temp.camp(a, s1, 'awaiting_approval'); perform begin_queueing(q, a, 2); perform pg_temp.jobs(q, 2);
   perform pg_temp.assert_eq('a fresh approval is not stale', revert_stale_queueing(15), 0);
   update campaigns set queue_started_at = now() - interval '1 hour' where id = q;
   perform pg_temp.assert_eq('a crashed approval is reverted', revert_stale_queueing(15), 1);
   select count(*) into n from sending_jobs where campaign_id = q; perform pg_temp.assert_eq('stale approval left no jobs', n, 0);
   raise notice 'queue: approval steps ok';
+end $$;
+
+-- ===================== monthly capacity reservations =====================
+do $$ declare a uuid := '00000000-0000-0000-0000-00000000000a'; s1 uuid := '00000000-0000-0000-0000-0000000000a1'; q1 uuid; q2 uuid;
+begin
+  perform pg_temp.reset();
+  update profiles set monthly_send_limit = 3 where id = a;
+  q1 := pg_temp.camp(a, s1, 'awaiting_approval');
+  q2 := pg_temp.camp(a, s1, 'awaiting_approval');
+  if begin_queueing(q1, a, 4) then raise exception 'FAIL: approval exceeded monthly plan limit'; end if;
+  if not begin_queueing(q1, a, 3) then raise exception 'FAIL: could not reserve remaining monthly plan capacity'; end if;
+  perform pg_temp.jobs(q1, 2);
+  if begin_queueing(q2, a, 1) then raise exception 'FAIL: duplicate reservation counted less than reserved amount'; end if;
+  if not activate_campaign(q1, a, 2) then raise exception 'FAIL: activation'; end if;
+  if not begin_queueing(q2, a, 1) then raise exception 'FAIL: open jobs were not counted after activation'; end if;
+  raise notice 'queue: monthly capacity reservation ok';
 end $$;
 
 -- ===================== unsubscribe =====================
@@ -339,7 +356,7 @@ begin
   begin perform * from claim_send_jobs('x', 1, 1, 1); raise exception 'FAIL: user can claim jobs'; exception when insufficient_privilege then null; end;
   begin perform apply_unsubscribe('x'); raise exception 'FAIL: user can call apply_unsubscribe directly'; exception when insufficient_privilege then null; end;
   begin perform cancel_campaign(q, '00000000-0000-0000-0000-00000000000a'); raise exception 'FAIL: user can call cancel_campaign directly'; exception when insufficient_privilege then null; end;
-  begin perform begin_queueing(q, '00000000-0000-0000-0000-00000000000a'); raise exception 'FAIL: user can self-approve'; exception when insufficient_privilege then null; end;
+  begin perform begin_queueing(q, '00000000-0000-0000-0000-00000000000a', 1); raise exception 'FAIL: user can self-approve'; exception when insufficient_privilege then null; end;
   begin perform pause_sender('00000000-0000-0000-0000-0000000000a1', 'x'); raise exception 'FAIL: user can pause senders'; exception when insufficient_privilege then null; end;
   begin perform count(*) from provider_events; raise exception 'FAIL: user can read provider_events'; exception when insufficient_privilege then null; end;
   begin perform count(*) from worker_heartbeats; raise exception 'FAIL: user can read worker_heartbeats'; exception when insufficient_privilege then null; end;

@@ -10,6 +10,8 @@ import { loadAudience } from "@/lib/compose/audience";
 import { contactVariables, parseFieldLines } from "@/lib/contacts/fields";
 import { analyzeAudience, renderTemplate } from "@/lib/personalize/engine";
 import type { ImportState, PreviewSample, PreviewState } from "@/lib/contacts/types";
+import { checkClientRequestLimit } from "@/lib/security/rate-limit";
+import { recordAbuseEvent } from "@/lib/security/abuse";
 
 const BASE = "/dashboard/contacts";
 const go = (k: "notice" | "error", m: string, path = BASE): never => redirect(`${path}?${k}=${encodeURIComponent(m)}`);
@@ -21,6 +23,11 @@ const audit = (user_id: string, action: string, detail: object) => admin().from(
 export async function importContacts(_prev: ImportState, fd: FormData): Promise<ImportState> {
   const { sb, user } = await me();
   const fail = (message: string): ImportState => ({ status: "error", message });
+  const limited = await checkClientRequestLimit("contacts.import", user.id, 5);
+  if (!limited.allowed) {
+    if (limited.thresholdCrossed) await recordAbuseEvent("rate_limit.contacts.import", limited.ip, { bucket: limited.bucket }, user.id);
+    return fail("Too many imports. Try again in a minute.");
+  }
 
   if (fd.get("consent_ack") !== "on") return fail("Confirm that you are authorized to contact these people.");
   const source = z.string().trim().min(3).max(200).safeParse(fd.get("consent_source"));

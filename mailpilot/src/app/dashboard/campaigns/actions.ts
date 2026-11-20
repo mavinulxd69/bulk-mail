@@ -12,6 +12,8 @@ import { enqueueMessages } from "@/lib/queue/enqueue";
 import { prepareCampaign } from "@/lib/queue/prepare";
 import { CAMPAIGN_COLUMNS, checkCampaignReady, type CampaignRow } from "@/lib/queue/ready";
 import { runTick } from "@/lib/queue/worker";
+import { checkClientRequestLimit } from "@/lib/security/rate-limit";
+import { recordAbuseEvent } from "@/lib/security/abuse";
 
 const uuid = z.string().uuid();
 async function me() { const sb = await createClient(); const { data: { user } } = await sb.auth.getUser(); if (!user) redirect("/login"); return { sb, user }; }
@@ -58,6 +60,12 @@ export async function confirmCampaign(fd: FormData) {
     .safeParse({ id: fd.get("id"), digest: fd.get("digest"), rate: fd.get("rate") ?? DEFAULT_SEND_RATE });
   if (!p.success) return redirect("/dashboard/campaigns");
   const id = p.data.id;
+  const limited = await checkClientRequestLimit("campaign.confirm", user.id, 5);
+  if (!limited.allowed) {
+    if (limited.thresholdCrossed) await recordAbuseEvent("rate_limit.campaign.confirm", limited.ip, { bucket: limited.bucket }, user.id);
+    return go(id, "error", "Too many campaign requests. Try again in a minute.");
+  }
+  if (!user.email_confirmed_at) return go(id, "error", "Verify your account email before sending campaigns.");
   if (fd.get("confirm") !== "on") return go(id, "error", "Tick the confirmation box to start sending.");
   if (!(SEND_RATE_CHOICES as readonly number[]).includes(p.data.rate)) return go(id, "error", "Choose a sending speed from the list.");
   const skipBlocked = fd.get("skip_blocked") === "on", includeUnconsented = fd.get("include_unconsented") === "on";
@@ -82,8 +90,8 @@ export async function confirmCampaign(fd: FormData) {
   if (prepared.totalBytes > MAX_CAMPAIGN_RENDERED_BYTES) return go(id, "error", "This campaign's messages are too large to queue at once. Split the audience.");
 
   const db = admin(), cfg = queueConfig();
-  const { data: began, error: beginErr } = await db.rpc("begin_queueing", { p_campaign: id, p_user: user.id });
-  if (beginErr || !began) return go(id, "error", "This campaign is already being approved. Refresh the page.");
+  const { data: began, error: beginErr } = await db.rpc("begin_queueing", { p_campaign: id, p_user: user.id, p_requested: prepared.messages.length });
+  if (beginErr || !began) return go(id, "error", "Could not reserve monthly sending capacity. Check your account limit or refresh and try again.");
 
   const rollback = async () => { try { await db.rpc("rollback_queueing", { p_campaign: id, p_user: user.id }); } catch { /* the worker's housekeeping reverts it later */ } };
   let jobCount = 0;

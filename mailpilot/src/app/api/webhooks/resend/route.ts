@@ -1,11 +1,18 @@
 import { NextResponse } from "next/server";
 import { admin } from "@/lib/supabase/admin";
 import { HANDLED_RESEND_EVENTS, parseResendEvent, verifySvix } from "@/lib/queue/webhook";
+import { checkIncomingRequestLimit } from "@/lib/security/rate-limit";
+import { recordAbuseEvent } from "@/lib/security/abuse";
 
 export const dynamic = "force-dynamic";
 
 // Resend delivery events. Signature-verified; stored first, then applied, so an event that arrives before our own "accepted" write isn't lost.
 export async function POST(req: Request) {
+  const limited = await checkIncomingRequestLimit("webhook.resend", req.headers, undefined, 1000);
+  if (!limited.allowed) {
+    if (limited.thresholdCrossed) await recordAbuseEvent("rate_limit.webhook.resend", limited.ip, { bucket: limited.bucket });
+    return NextResponse.json({ error: "too many requests" }, { status: 429, headers: { "Retry-After": String(limited.retryAfter) } });
+  }
   const secret = process.env.RESEND_WEBHOOK_SECRET;
   if (!secret) return NextResponse.json({ error: "RESEND_WEBHOOK_SECRET is not configured" }, { status: 503 });
   const raw = await req.text();

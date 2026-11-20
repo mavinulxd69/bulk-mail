@@ -1,6 +1,6 @@
 # MailPilot
 
-Multi-tenant personalized email automation. **Status: Phase 6 of 7** (approval, persistent sending queue, retries, webhooks, unsubscribe, campaign tracking).
+Multi-tenant personalized email automation. **Status: Phase 7 of 7** (security, abuse controls, account administration, testing and deployment preparation).
 
 ## Plan
 | Phase | Scope |
@@ -118,14 +118,40 @@ Approving a campaign also starts a short best-effort run, so sending begins imme
 npm test                 # unit tests (CSV, validation, engine, composer, AI, queue/retry/webhook logic); no database needed
 npm run typecheck
 ```
+
+## Development standards
+- Put reusable UI in `src/components/`, provider adapters in `src/lib/providers/`, and queue/compose/business rules in `src/lib/`; keep server actions focused on validation, authorization, orchestration, and user-facing results.
+- Validate all client-submitted values on the server. Use the existing provider interface and keep tests explicit when an adapter is faked.
+- Route-level loading and error boundaries provide feedback during navigation or unexpected failures. Forms and data pages should keep their empty states and inline success/error notices accessible with status roles.
+- `MAILPILOT_MOCK_PROVIDER=1` is local-development only. The mock never calls an email provider, marks every result simulated, and is ignored in production. Simulated sends are never counted as real delivery or usage.
+- Add schema changes as ordered Supabase migrations, including indexes for new query paths, and cover tenant isolation with database tests before deploying.
+
 Database tests (use a local or throwaway Supabase/Postgres, never production):
-1. Apply all migrations (Postgres 15+), then `supabase/tests/rls_isolation.sql`, `rls_contacts.sql`, `rls_compose.sql` and `queue.sql` (claiming, quotas, rates, pauses, crash recovery, status, approval steps, unsubscribe, webhooks, erasure, privileges). Each must print "all checks passed". On a plain local Postgres (not Supabase) run `supabase/tests/local_bootstrap.sql` first; it recreates Supabase's roles and `auth` stub. Never run it on Supabase.
+1. Apply all migrations (Postgres 15+), then `supabase/tests/rls_isolation.sql`, `rls_contacts.sql`, `rls_compose.sql`, `rls_all_tables.sql` and `queue.sql` (claiming, quotas, rates, pauses, crash recovery, status, approval steps, unsubscribe, webhooks, erasure, privileges). Each must print "all checks passed". `rls_all_tables.sql` verifies RLS is enabled on every exposed and server-only table, tenant A data is invisible to tenant B, and token/webhook/abuse data is not readable by browser roles. On a plain local Postgres (not Supabase) run `supabase/tests/local_bootstrap.sql` first; it recreates Supabase's roles and `auth` stub. Never run it on Supabase.
 2. Integration test of the real import pipeline and page queries through the REST API with RLS on, as two tenants:
    run `supabase/tests/seed_integration_users.sql`, then
-   `PGRST_URL=<rest url> PGRST_JWT_SECRET=<jwt secret> NEXT_PUBLIC_SITE_URL=https://app.test npm test`. This also runs `queue.integration.test.ts`: the real approval pipeline, store and worker against the database with only the email provider faked (16 scenarios: exactly-once sending with 3 concurrent workers, rate limit, retries, quota pause/resume, Gmail-vs-Resend unknown outcomes, crash recovery, cancel, unsubscribe, contact erasure, webhooks, tenant isolation of every page query). The URL must serve PostgREST at its root (a local PostgREST, not the hosted `/rest/v1` path). Without those variables the test is skipped.
+   `PGRST_URL=<rest url> PGRST_JWT_SECRET=<jwt secret> NEXT_PUBLIC_SITE_URL=https://app.test npm test`. This also runs `queue.integration.test.ts`: the real approval pipeline, store and worker against the database with only the email provider faked. It covers concurrent workers, shared user quotas across sender accounts, rate limits, retries, pause/resume, provider uncertainty, crash recovery, cancellation, unsubscribe, contact erasure, webhooks, and tenant isolation. The URL must serve PostgREST at its root (a local PostgREST, not the hosted `/rest/v1` path). Without those variables the test is skipped.
 
-## Known limitations (carried to Phase 7)
-- General request rate limiting (login, import, unsubscribe, webhook endpoints), abuse monitoring, the `/admin` console and account-level plan quotas are Phase 7. Sending is already capped per sender, campaign and user (rolling 24 h).
+## Phase 7: security and administration
+- Authentication, OAuth, contact/sender actions, test sends, campaign confirmation, webhooks, and unsubscribe use request limits. Local development uses a bounded in-memory limiter; production requires both Upstash credentials and fails closed if they are absent or unavailable. Upstash increments and expirations run in one transaction. Abuse events store an HMAC of the client IP, not its raw value.
+- `/admin` is restricted to `profiles.is_admin`; it includes account plans, account disable/enable actions, abuse summary and recent audit events.
+- Account plans reserve monthly capacity atomically at campaign confirmation. Queue claims serialize on the user profile so concurrent workers across multiple sender accounts cannot exceed the rolling daily cap; sender limits remain separate.
+- Campaign sending requires a verified account email and an explicit confirmation. Campaign imports and confirmation require the user to attest that recipients consented or are otherwise authorized; unsubscribe requests and provider complaints create suppression records checked before sending.
+- OAuth refresh/access tokens are encrypted with AES-256-GCM using `TOKEN_ENCRYPTION_KEY`; the service-role key is server-only. OAuth state is random, HttpOnly, short-lived, and timing-safely validated. Next.js Server Actions provide origin/CSRF checks; provider webhooks require their signature.
+- Settings supports password changes and confirmed account deletion through the Supabase Admin API.
+- Apply `supabase/migrations/0006_phase7.sql` and `0007_security_quota_hardening.sql` after the earlier migrations.
+
+## Step 8: production launch preparation
+1. Apply all migrations in filename order to the target Supabase project.
+2. Set production secrets in the hosting platform, never in source control.
+3. Configure the public HTTPS `NEXT_PUBLIC_SITE_URL`, Google redirect URI and Resend webhook URL.
+4. Run `npm run verify:production` before deployment. This only verifies configuration; it does not send email.
+5. Run `npm run build` and `npm test`.
+6. Configure an external worker or Vercel Cron with `CRON_SECRET`, and verify `/api/health` returns 200.
+7. In a non-production test account, perform and document Gmail and Resend end-to-end test sends.
+8. Capture real delivery/bounce webhook events through the provider dashboards before approving volume.
+
+## Known limitations
 - Gmail: no delivery or bounce reporting (send-only scope), no idempotency; jobs in an unknown state are failed, not re-sent. Quota pauses are estimated by backoff, because Gmail doesn't tell a client when its limit resets.
 - A message already handed to the provider when you cancel can't be recalled.
 - Rendered messages are stored per recipient (up to 100 MB per campaign) so what you approved is exactly what is sent; they are erased when the contact is deleted. Provider webhook payloads are purged after 30 days.
