@@ -90,6 +90,10 @@ async function PauseBanners({ c, sender, open }: { c: CampaignRow; sender: { sta
 
 async function Review({ c, sbPromise: sb }: { c: CampaignRow; sbPromise: Awaited<ReturnType<typeof createClient>> }) {
   const { data: { user } } = await sb.auth.getUser();
+  const { data: profile } = user
+    ? await sb.from("profiles").select("trial_send_limit").eq("id", user.id).maybeSingle()
+    : { data: null };
+  const isTrial = profile?.trial_send_limit != null;
   const ready = await checkCampaignReady(sb, user ?? {}, c);
   const back = <form action={backToDraft}><input type="hidden" name="id" value={c.id} /><button className={btn2}>Back to draft</button></form>;
   if (!ready.ok) return <section className={card}><h2 className="font-display text-xl font-semibold">Can&apos;t be approved yet</h2><p role="alert" className="mt-2 text-sm text-post">{ready.message}</p><div className="mt-4">{back}</div></section>;
@@ -121,12 +125,13 @@ async function Review({ c, sbPromise: sb }: { c: CampaignRow; sbPromise: Awaited
       {m && <div><h3 className="font-medium">Example: what {sample!.contact.email} receives</h3><p className="mt-1 text-sm text-ink/70">Subject: {m.subject}</p>
         {m.html ? <iframe title="Example email" sandbox="" srcDoc={m.html} className="mt-2 h-64 w-full rounded-lg border border-ink/15 bg-white" /> : <pre className="mt-2 whitespace-pre-wrap rounded-lg border border-ink/15 bg-white p-3 text-sm">{m.text}</pre>}</div>}
       {report.blocked > 0 && <p className="text-sm text-ink/70">{report.blocked} recipient{report.blocked === 1 ? " is" : "s are"} missing data for {needed.map((v) => `{{${v}}}`).join(", ")}. A message is never sent half-personalized.</p>}
+      {isTrial && <p className="rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-950">Trial campaigns go only to contacts with documented consent. Contacts without a consent record will be skipped.</p>}
 
       <form action={confirmCampaign} className="space-y-4 rounded-xl border border-ink/15 bg-white p-4">
         <input type="hidden" name="id" value={c.id} /><input type="hidden" name="digest" value={audienceDigest(contacts)} />
         <label className="block text-sm font-medium">Sending speed<select name="rate" defaultValue={DEFAULT_SEND_RATE} className={inp}>{SEND_RATE_CHOICES.map((r) => <option key={r} value={r}>{r} per minute{r === DEFAULT_SEND_RATE ? " (recommended)" : ""}</option>)}</select></label>
         {report.blocked > 0 && <label className="flex gap-2 text-sm"><input type="checkbox" name="skip_blocked" className="mt-1" /><span>Skip the {report.blocked} recipient{report.blocked === 1 ? "" : "s"} with missing data and send to everyone else</span></label>}
-        {unconsented > 0 && <label className="flex gap-2 text-sm"><input type="checkbox" name="include_unconsented" className="mt-1" /><span>Also send to {unconsented} contact{unconsented === 1 ? "" : "s"} with <strong>no consent record</strong> (added before consent tracking). I confirm I&apos;m authorized to contact them. Left unticked, they are skipped.</span></label>}
+        {!isTrial && unconsented > 0 && <label className="flex gap-2 text-sm"><input type="checkbox" name="include_unconsented" className="mt-1" /><span>Also send to {unconsented} contact{unconsented === 1 ? "" : "s"} with <strong>no consent record</strong> (added before consent tracking). I confirm I&apos;m authorized to contact them. Left unticked, they are skipped.</span></label>}
         <label className="flex gap-2 text-sm font-medium"><input type="checkbox" name="confirm" required className="mt-1" /><span>I have reviewed this campaign and I&apos;m authorized to email these recipients. Start sending.</span></label>
         <div className="flex flex-wrap gap-3"><button className={btn} disabled={sendable === 0}>Confirm and start sending</button></div>
       </form>

@@ -68,7 +68,10 @@ export async function confirmCampaign(fd: FormData) {
   if (!user.email_confirmed_at) return go(id, "error", "Verify your account email before sending campaigns.");
   if (fd.get("confirm") !== "on") return go(id, "error", "Tick the confirmation box to start sending.");
   if (!(SEND_RATE_CHOICES as readonly number[]).includes(p.data.rate)) return go(id, "error", "Choose a sending speed from the list.");
-  const skipBlocked = fd.get("skip_blocked") === "on", includeUnconsented = fd.get("include_unconsented") === "on";
+  const { data: trialProfile } = await sb.from("profiles").select("trial_send_limit").eq("id", user.id).maybeSingle();
+  const isTrial = trialProfile?.trial_send_limit != null;
+  const skipBlocked = fd.get("skip_blocked") === "on";
+  const includeUnconsented = !isTrial && fd.get("include_unconsented") === "on";
 
   const c = await load(sb, id);
   if (!c) return redirect("/dashboard/campaigns");
@@ -91,7 +94,13 @@ export async function confirmCampaign(fd: FormData) {
 
   const db = admin(), cfg = queueConfig();
   const { data: began, error: beginErr } = await db.rpc("begin_queueing", { p_campaign: id, p_user: user.id, p_requested: prepared.messages.length });
-  if (beginErr || !began) return go(id, "error", "Could not reserve monthly sending capacity. Check your account limit or refresh and try again.");
+  if (beginErr || !began) {
+    const { data: profile } = await db.from("profiles").select("trial_send_limit").eq("id", user.id).maybeSingle();
+    if (profile?.trial_send_limit) {
+      return go(id, "error", `Your verified-email trial allows up to ${profile.trial_send_limit} campaign emails total, including queued messages. Upgrade your account to send more.`);
+    }
+    return go(id, "error", "Could not reserve monthly sending capacity. Check your account limit or refresh and try again.");
+  }
 
   const rollback = async () => { try { await db.rpc("rollback_queueing", { p_campaign: id, p_user: user.id }); } catch { /* the worker's housekeeping reverts it later */ } };
   let jobCount = 0;

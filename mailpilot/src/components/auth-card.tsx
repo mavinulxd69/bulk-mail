@@ -1,10 +1,11 @@
 import Link from "next/link";
-export function AuthCard({ title, action, error, notice, password = true, submit, footer }: { title: string; action: (fd: FormData) => Promise<void>; error?: string; notice?: string; password?: boolean; submit: string; footer: React.ReactNode }) {
+export function AuthCard({ title, action, error, notice, description, password = true, submit, footer }: { title: string; action: (fd: FormData) => Promise<void>; error?: string; notice?: string; description?: string; password?: boolean; submit: string; footer: React.ReactNode }) {
   return (
     <main className="grid min-h-screen place-items-center px-6">
       <div className="w-full max-w-sm">
         <Link href="/" className="font-display text-xl font-bold">MailPilot</Link>
         <h1 className="mt-6 font-display text-3xl font-bold">{title}</h1>
+        {description && <p className="mt-2 text-sm leading-6 text-ink/70">{description}</p>}
         {error && <p role="alert" className="mt-4 rounded-lg bg-post/10 p-3 text-sm text-post">{error}</p>}
         {notice && <p role="status" className="mt-4 rounded-lg bg-sky p-3 text-sm">{notice}</p>}
         <form action={action} className="mt-6 space-y-4">

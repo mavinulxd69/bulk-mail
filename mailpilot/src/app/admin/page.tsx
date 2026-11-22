@@ -34,7 +34,8 @@ async function setPlan(fd: FormData) {
   if (!id.success || !plan.success) redirect("/admin");
   const limits = { starter: 100, growth: 5000, scale: 100000 };
   const db = admin();
-  await db.from("profiles").update({ plan: plan.data, monthly_send_limit: limits[plan.data] }).eq("id", id.data);
+  const changes = { plan: plan.data, monthly_send_limit: limits[plan.data], ...(plan.data === "starter" ? {} : { trial_send_limit: null }) };
+  await db.from("profiles").update(changes).eq("id", id.data);
   await db.from("audit_logs").insert({ user_id: id.data, action: "account.plan_changed", detail: { plan: plan.data, by: user.id } });
   revalidatePath("/admin");
   redirect("/admin");
@@ -47,7 +48,7 @@ export default async function Admin() {
   if (!p?.is_admin) notFound();
   const db = admin();
   const [{ data: profiles }, { data: recentAudit }, { data: abuse }] = await Promise.all([
-    db.from("profiles").select("id,display_name,plan,monthly_send_limit,created_at").order("created_at", { ascending: false }).limit(100),
+    db.from("profiles").select("id,display_name,plan,monthly_send_limit,trial_send_limit,created_at").order("created_at", { ascending: false }).limit(100),
     db.from("audit_logs").select("id,user_id,action,detail,created_at").order("created_at", { ascending: false }).limit(50),
     db.rpc("abuse_summary", { p_since: new Date(Date.now() - 86400_000).toISOString() }),
   ]);
@@ -63,8 +64,8 @@ export default async function Admin() {
         <h2 className="font-display text-xl font-semibold">Accounts</h2>
         <div className="mt-3 overflow-x-auto rounded-xl border border-ink/10 bg-white">
           <table className="w-full text-left text-sm"><thead><tr><th className="p-3">Account</th><th className="p-3">Plan / limit</th><th className="p-3">Actions</th></tr></thead><tbody className="divide-y divide-ink/10">
-            {(profiles ?? []).map((p: { id: string; display_name: string | null; plan: string; monthly_send_limit: number }) => (
-              <tr key={p.id}><td className="p-3">{p.display_name || p.id}</td><td className="p-3">{p.plan} / {p.monthly_send_limit}/month</td><td className="p-3">
+            {(profiles ?? []).map((p: { id: string; display_name: string | null; plan: string; monthly_send_limit: number; trial_send_limit: number | null }) => (
+              <tr key={p.id}><td className="p-3">{p.display_name || p.id}</td><td className="p-3">{p.plan} / {p.monthly_send_limit}/month{p.trial_send_limit ? ` · ${p.trial_send_limit} trial total` : ""}</td><td className="p-3">
                 <form action={setPlan} className="inline-flex gap-2"><input type="hidden" name="id" value={p.id} /><select name="plan" defaultValue={p.plan} className="rounded border px-2 py-1"><option value="starter">Starter</option><option value="growth">Growth</option><option value="scale">Scale</option></select><button className="underline">Save plan</button></form>
                 <form action={setAccountStatus} className="ml-4 inline"><input type="hidden" name="id" value={p.id} /><input type="hidden" name="disabled" value="on" /><button className="text-post underline">Disable</button></form>
                 <form action={setAccountStatus} className="ml-3 inline"><input type="hidden" name="id" value={p.id} /><button className="underline">Enable</button></form>

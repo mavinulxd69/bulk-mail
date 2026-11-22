@@ -5,7 +5,7 @@ Multi-tenant personalized email automation. **Status: Phase 7 of 7** (security, 
 ## Plan
 | Phase | Scope |
 |---|---|
-| 1 | Next.js + Tailwind, landing page, Supabase auth (signup, verify, login, reset), route protection |
+| 1 | Next.js + Tailwind, landing page, passwordless verified-email trial, login, reset, route protection |
 | 2 | Migrations, all tables, RLS + isolation tests, dashboard shell |
 | 3 | Gmail OAuth, Resend domains, provider adapter interface, token encryption |
 | 4 | Contacts, CSV import, consent, variable engine with missing-variable blocking |
@@ -16,13 +16,15 @@ Multi-tenant personalized email automation. **Status: Phase 7 of 7** (security, 
 ## Setup
 1. `npm install`
 2. Create a Supabase project; copy `.env.example` to `.env.local` and fill the URL and anon key.
-3. In Supabase Auth: enable email confirmation; add `http://localhost:3000/auth/callback` as a redirect URL.
+3. In Supabase Auth, configure email delivery (custom SMTP is recommended; the built-in sender is heavily rate-limited) and add `${NEXT_PUBLIC_SITE_URL}/auth/callback` as a redirect URL.
 4. Apply `supabase/migrations/*.sql` in order (SQL editor or `supabase db push`), then run the files in `supabase/tests/`; each must report "all checks passed". Migration 0004 needs Postgres 15+ (Supabase projects have it).
 5. Make yourself admin: `update profiles set is_admin = true where id = '<your user id>';`
 6. `npm run dev`
 
 Without Supabase variables the auth pages show a setup error and never pretend to work.
 The UI uses plain Tailwind components (shadcn/ui was not adopted). See Testing.
+
+**Verified-email trial.** `/signup` asks only for an email and sends a secure sign-in link; there is no password or full account setup. Verifying creates the workspace and grants up to 20 campaign emails for the lifetime of that trial. Active queued emails reserve capacity; failed or cancelled unsent jobs do not consume it. Users still connect their own Gmail or verified Resend sender and must send only to recipients they are authorized to contact. Existing accounts keep their existing limits; an admin plan upgrade removes the trial cap.
 
 ## Phase 3 setup
 - `TOKEN_ENCRYPTION_KEY`: `openssl rand -base64 32`. Tokens are AES-256-GCM encrypted; back this key up.
@@ -139,7 +141,7 @@ Database tests (use a local or throwaway Supabase/Postgres, never production):
 - Campaign sending requires a verified account email and an explicit confirmation. Campaign imports and confirmation require the user to attest that recipients consented or are otherwise authorized; unsubscribe requests and provider complaints create suppression records checked before sending.
 - OAuth refresh/access tokens are encrypted with AES-256-GCM using `TOKEN_ENCRYPTION_KEY`; the service-role key is server-only. OAuth state is random, HttpOnly, short-lived, and timing-safely validated. Next.js Server Actions provide origin/CSRF checks; provider webhooks require their signature.
 - Settings supports password changes and confirmed account deletion through the Supabase Admin API.
-- Apply `supabase/migrations/0006_phase7.sql` and `0007_security_quota_hardening.sql` after the earlier migrations.
+- Apply `supabase/migrations/0006_phase7.sql`, `0007_security_quota_hardening.sql`, and `0008_verified_trial.sql` after the earlier migrations.
 
 ## Step 8: production launch preparation
 1. Apply all migrations in filename order to the target Supabase project.

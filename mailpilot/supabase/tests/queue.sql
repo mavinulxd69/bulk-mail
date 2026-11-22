@@ -1,5 +1,5 @@
 -- Queue and security checks: claiming, quotas, rates, pauses, crash recovery, campaign status, approval steps, unsubscribe,
--- webhook application, contact erasure and privileges. Run AFTER migrations 0001-0007. Raises on any failure; rolls back.
+-- webhook application, contact erasure and privileges. Run AFTER migrations 0001-0008. Raises on any failure; rolls back.
 begin;
 
 insert into auth.users (id, instance_id, aud, role, email) values
@@ -35,7 +35,7 @@ end $$;
 create function pg_temp.reset() returns void language sql as $$
   delete from campaigns;  -- cascades to recipients, jobs, events
   update sender_accounts set status = 'connected', paused_until = null, pause_count = 0, pause_reason = null, daily_quota = 100;
-  update profiles set monthly_send_limit = 100;
+  update profiles set monthly_send_limit = 100, trial_send_limit = null;
 $$;
 create function pg_temp.claimed(p_batch int default 100, p_rate int default 1000, p_user_day int default 100000) returns int language sql as $$
   select count(*)::int from claim_send_jobs('w-test', p_batch, p_rate, p_user_day);
@@ -247,6 +247,26 @@ begin
   if not activate_campaign(q1, a, 2) then raise exception 'FAIL: activation'; end if;
   if not begin_queueing(q2, a, 1) then raise exception 'FAIL: open jobs were not counted after activation'; end if;
   raise notice 'queue: monthly capacity reservation ok';
+end $$;
+
+-- ===================== lifetime verified-email trial capacity =====================
+do $$ declare a uuid := '00000000-0000-0000-0000-00000000000a'; s1 uuid := '00000000-0000-0000-0000-0000000000a1'; q1 uuid; q2 uuid;
+begin
+  perform pg_temp.reset();
+  update profiles set monthly_send_limit = 100, trial_send_limit = 3 where id = a;
+  q1 := pg_temp.camp(a, s1, 'awaiting_approval');
+  q2 := pg_temp.camp(a, s1, 'awaiting_approval');
+  if begin_queueing(q1, a, 4) then raise exception 'FAIL: verified trial exceeded lifetime limit'; end if;
+  if not begin_queueing(q1, a, 3) then raise exception 'FAIL: trial could not reserve all available sends'; end if;
+  perform pg_temp.jobs(q1, 3);
+  if begin_queueing(q2, a, 1) then raise exception 'FAIL: another campaign exceeded reserved trial sends'; end if;
+  if not activate_campaign(q1, a, 3) then raise exception 'FAIL: trial campaign activation'; end if;
+  update sending_jobs set status = 'accepted', accepted_at = now() - interval '2 months'
+   where campaign_id = q1 and id in (select id from sending_jobs where campaign_id = q1 limit 2);
+  if cancel_campaign(q1, a) is null then raise exception 'FAIL: trial campaign cancellation'; end if;
+  if begin_queueing(q2, a, 2) then raise exception 'FAIL: lifetime trial counter reset across months'; end if;
+  if not begin_queueing(q2, a, 1) then raise exception 'FAIL: unused trial capacity was not released'; end if;
+  raise notice 'queue: lifetime verified-email trial capacity ok';
 end $$;
 
 -- ===================== unsubscribe =====================

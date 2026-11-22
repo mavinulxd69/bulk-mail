@@ -141,7 +141,7 @@ export default function Home() {
           <div className="flex items-center gap-3">
             <Link href="/login" className="hidden rounded-full px-3 py-2 text-sm font-medium text-ink/70 transition hover:text-ink sm:inline-flex">Log in</Link>
             <Link href="/signup" className="inline-flex items-center gap-2 rounded-full bg-ink px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#1b2c55] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-post sm:px-5">
-              Get started <Icon name="arrow" className="h-4 w-4" />
+              Try 20 emails free <Icon name="arrow" className="h-4 w-4" />
             </Link>
             <details className="relative lg:hidden">
               <summary aria-label="Open navigation menu" className="grid h-10 w-10 cursor-pointer list-none place-items-center rounded-full border border-ink/10 text-ink [&::-webkit-details-marker]:hidden">
@@ -176,7 +176,7 @@ export default function Home() {
               </p>
               <div className="mt-8 flex flex-wrap items-center gap-3">
                 <Link href="/signup" className="inline-flex min-h-12 items-center justify-center gap-2 rounded-full bg-post px-6 py-3 text-sm font-semibold text-white shadow-[0_8px_24px_-10px_rgba(229,72,77,0.7)] transition hover:-translate-y-0.5 hover:bg-[#d83d43] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink">
-                  Start Sending Smarter <Icon name="arrow" className="h-4 w-4" />
+                  Start your 20-email trial <Icon name="arrow" className="h-4 w-4" />
                 </Link>
                 <a href="#features" className="inline-flex min-h-12 items-center justify-center rounded-full border border-ink/15 bg-white/70 px-6 py-3 text-sm font-semibold text-ink transition hover:border-ink/30 hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-post">
                   Explore Features
@@ -185,6 +185,7 @@ export default function Home() {
               <div className="mt-8 flex flex-wrap gap-x-6 gap-y-3 text-xs font-medium text-ink/55">
                 <span className="inline-flex items-center gap-2"><Icon name="check" className="h-4 w-4 text-[#38836b]" /> Review before sending</span>
                 <span className="inline-flex items-center gap-2"><Icon name="check" className="h-4 w-4 text-[#38836b]" /> Built for authorized outreach</span>
+                <span className="inline-flex items-center gap-2"><Icon name="check" className="h-4 w-4 text-[#38836b]" /> No password required</span>
               </div>
             </div>
             <SampleCampaign />
@@ -329,7 +330,7 @@ export default function Home() {
             <div className="mx-auto max-w-2xl text-center">
               <p className="text-xs font-bold uppercase tracking-[0.2em] text-post">Plans</p>
               <h2 className="mt-4 font-display text-3xl font-semibold tracking-tight sm:text-4xl">Straightforward plans, when billing is ready.</h2>
-              <p className="mt-4 leading-7 text-ink/60">Plan structure preview. Billing is not connected, these are not purchasable, and no payment will be collected.</p>
+              <p className="mt-4 leading-7 text-ink/60">Start with 20 campaign emails after verifying your email. No password or payment is required. Paid billing is not connected; the plans below are previews only.</p>
             </div>
             <div className="mt-10 grid gap-4 lg:grid-cols-3">
               {[

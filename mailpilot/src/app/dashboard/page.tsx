@@ -31,9 +31,20 @@ export default async function Overview() {
     sb.from("daily_send_stats").select("day,accepted").gte("day", since).order("day"),
     sb.from("sending_events").select("id,type,created_at,sending_jobs(campaign_id,campaign_recipients(email))")
       .order("created_at", { ascending: false }).limit(6),
-    user ? sb.from("profiles").select("display_name").eq("id", user.id).maybeSingle() : Promise.resolve({ data: null }),
+    user ? sb.from("profiles").select("display_name,trial_send_limit").eq("id", user.id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
-  const [sent, pending, failed, senders, contacts, campaigns, active] = await Promise.all([
+  const trialQuota = async () => {
+    if (profile?.trial_send_limit == null) return null;
+    const [{ count: accepted }, { count: reserved }] = await Promise.all([
+      sb.from("sending_jobs").select("id", { count: "exact", head: true }).not("accepted_at", "is", null).eq("simulated", false),
+      sb.from("sending_jobs").select("id", { count: "exact", head: true }).in("status", ["pending", "processing"]),
+    ]);
+    return {
+      limit: profile.trial_send_limit,
+      remaining: Math.max(0, profile.trial_send_limit - (accepted ?? 0) - (reserved ?? 0)),
+    };
+  };
+  const [sent, pending, failed, senders, contacts, campaigns, active, trial] = await Promise.all([
     sentCount(),
     count("sending_jobs", "status", ["pending", "processing"]),
     count("sending_jobs", "status", ["failed", "bounced"]),
@@ -41,6 +52,7 @@ export default async function Overview() {
     count("contacts"),
     count("campaigns"),
     count("campaigns", "status", ["queued", "sending"]),
+    trialQuota(),
   ]);
 
   const byDay = new Map((daily ?? []).map((row: { day: string; accepted: number }) => [row.day, row.accepted]));
@@ -76,6 +88,9 @@ export default async function Overview() {
           Create campaign
         </Link>
       </section>
+      {trial && <p role="status" className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-950">
+        <strong>Free verified-email trial:</strong> {trial.remaining} of {trial.limit} campaign emails remaining. Queued emails reserve trial credits; only emails accepted by your provider use them permanently.
+      </p>}
 
       <section aria-labelledby="onboarding-title" className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#18285b] via-[#273b78] to-[#364b8d] p-5 text-white shadow-xl shadow-indigo-950/10 sm:p-7">
         <div aria-hidden="true" className="pointer-events-none absolute -right-16 -top-24 h-72 w-72 rounded-full bg-sky/10 blur-3xl" />

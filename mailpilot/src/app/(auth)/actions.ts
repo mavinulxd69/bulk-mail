@@ -5,7 +5,8 @@ import { createClient } from "@/lib/supabase/server";
 import { admin } from "@/lib/supabase/admin";
 import { checkClientRequestLimit } from "@/lib/security/rate-limit";
 import { recordAbuseEvent } from "@/lib/security/abuse";
-const creds = z.object({ email: z.string().trim().email(), password: z.string().min(10, "Use at least 10 characters.") });
+const emailSchema = z.string().trim().email();
+const creds = z.object({ email: emailSchema, password: z.string().min(10, "Use at least 10 characters.") });
 const site = () => process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
 const fail = (path: string, msg: string): never => redirect(`${path}?error=${encodeURIComponent(msg)}`);
 const configured = () => !!process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -31,12 +32,23 @@ export async function signup(fd: FormData) {
     if (limited.thresholdCrossed) await recordAbuseEvent("rate_limit.auth.signup", limited.ip, { bucket: limited.bucket });
     fail("/signup", "Too many attempts. Try again later.");
   }
-  const p = creds.safeParse({ email: fd.get("email"), password: fd.get("password") });
-  if (!p.success) fail("/signup", p.error.issues[0]?.message ?? "Check your details.");
-  const { data, error } = await (await createClient()).auth.signUp({ ...p.data!, options: { emailRedirectTo: `${site()}/auth/callback` } });
-  if (error) fail("/signup", "Could not create the account. Try a different email or password.");
-  if (data.user) await admin().from("audit_logs").insert({ user_id: data.user.id, action: "auth.signup", detail: {} });
-  redirect("/login?notice=" + encodeURIComponent("Check your inbox to verify your email, then log in."));
+  const p = emailSchema.safeParse(fd.get("email"));
+  if (!p.success) fail("/signup", "Enter a valid email address.");
+  const { error } = await (await createClient()).auth.signInWithOtp({
+    email: p.data!,
+    options: { emailRedirectTo: `${site()}/auth/callback`, shouldCreateUser: true },
+  });
+  if (error) {
+    console.error("[auth.trial]", { code: error.code, message: error.message });
+    if (error.code === "over_email_send_rate_limit") {
+      fail("/signup", "Verification email sending is temporarily rate-limited. Try again later or configure custom SMTP in Supabase.");
+    }
+    if (error.code === "email_address_invalid") {
+      fail("/signup", "Enter a valid email address.");
+    }
+    fail("/signup", "Could not send a sign-in link. Check the email address and try again.");
+  }
+  redirect("/signup?notice=" + encodeURIComponent("Check your inbox for a secure sign-in link. Verifying your email starts a free trial with up to 20 campaign emails."));
 }
 export async function forgotPassword(fd: FormData) {
   if (!configured()) fail("/forgot-password", "Supabase is not configured. See README setup.");
